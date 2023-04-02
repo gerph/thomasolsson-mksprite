@@ -31,7 +31,11 @@ $var
         ADCS R0,R0,R2
         STR R3,[R1]
         STR R0,[R1,#4]
+    [ {CONFIG} = 32
+        LDMFD R13!,{PC}
+    |
         LDMFD R13!,{PC}^
+    ]
         FUNCEND
 
 jan1970 DCD &6E996A00
@@ -49,6 +53,10 @@ jan1970 DCD &6E996A00
         MOV R0,R2,LSL#24
         ORR R0,R0,R1,LSL#16
         MOV R0,R0,ASR#16
+    [ {CONFIG} = 32
+        LDMFD R13!,{PC}
+    |
         LDMFD R13!,{PC}^
+    ]
 
 	END

@@ -17,8 +17,16 @@ XDrawFile_Render    *   0x65540
 	                        ; R2= length of drawfile
 	                        ; R3->transformation matrix
 	STMFD R13!,{R14}
+    [ {CONFIG} = 32
+    MRS R12, CPSR
+    SWI XOS_EnterOS
+    |
+    ; Gerph: Strictly it's unnecessary to keep this TEQP-based code path as we know
+    ; that we must support MSR/MRS since we also rely on UMULL, but it's closer to
+    ; the original to just use the old mechanism.
 	MOV R12,PC
 	SWI XOS_EnterOS
+    ]
 	STMFD R13!,{R14}
 	 ADR R14,args
 	 STMIA R14,{R1-R3}
@@ -27,6 +35,12 @@ XDrawFile_Render    *   0x65540
 	 MOV R3,#0
 	 MOV R0,#&23C
 	 SWI XOS_SpriteOp	; has to be in SVC mode, otherwise taskwindow crashes
+     ; Gerph: This is necessary because otherwise the system might switch the task
+     ;        away whilst we have the output redirected. Versions of TaskWindow on
+     ;        RISC OS Select from 0.73 onwards will preserve the sprite context
+     ;        if a context is provided - however, we don't provide a context (in
+     ;        R3). Does this mean that if the render needed to call FontManager
+     ;        and needed to redirect output, that we would lose our context?
 	 BVS exit
 	 STMFD R13!,{R0-R4}
 	  MOV R0,#0
@@ -38,9 +52,14 @@ XDrawFile_Render    *   0x65540
 	 LDMFD R13!,{R0-R4}
 	 SWI XOS_SpriteOp
 exit	LDMFD R13!,{R14}
+    [ {CONFIG} = 32
+    MSR CPSR_cxsf, r12           ; restore PSR to user mode
+    LDMFD R13!, {PC}
+    |
 	TEQP R12,#0		; back to USR
 	NOP
         LDMFD R13!,{PC}^
+    ]
 	FUNCEND
 
 args
@@ -58,7 +77,11 @@ trans   DCD 0
          ADDCC R0,R0,#1
          MOVCCS R2,R2,LSL#1	; worst case 31 loops
         BCC %b1
+    [ {CONFIG} = 32
+        MOV PC,R14
+    |
         MOVS PC,R14
+    ]
         FUNCEND
 
         FUNC magnitude2		; R0=X
@@ -76,7 +99,11 @@ trans   DCD 0
          MOV R3,R3,LSR R2
         BNE %b1
         ADD R0,R1,#1
+    [ {CONFIG} = 32
+        MOV PC,R14
+    |
         MOVS PC,R14
+    ]
         FUNCEND
 
         FUNC magnitude3		; R0=X
@@ -91,7 +118,11 @@ trans   DCD 0
         EOR R1,R1,R1,LSR#1
         MUL R1,R2,R1
         AND R0,R1,#31
+    [ {CONFIG} = 32
+        MOV PC,R14
+    |
         MOVS PC,R14
+    ]
         FUNCEND
 
 magic   DCD 0x0450FEBF
