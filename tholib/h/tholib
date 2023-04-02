@@ -257,8 +257,11 @@ void ensureparent(const char *name);
 /* change filename, making unsafe chars safe */
 void transfile(char *name);
 
+#ifdef USE_BISMSG
+/* Gerph: `bis_msg` is not defined anywhere, so this is configured out */
 /* Send a bis message */
 void bismsg(const char *fmt, ...);
+#endif
 
 /* Utils for doubly linked lists */
 

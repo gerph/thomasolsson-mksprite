@@ -4,6 +4,11 @@
 #include "mksprite.h"
 #include "mks_asm.h"
 
+/* Gerph: DrawFile_BBox isn't defined here, so here's the definition */
+#ifndef DrawFile_BBox
+#define DrawFile_BBox       (0x45541)
+#endif
+
 word *convert_aff(const arg_t *arg, _kernel_oserror **e)
 {
   int len;

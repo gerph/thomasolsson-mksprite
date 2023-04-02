@@ -453,6 +453,8 @@ void transfile(char *name)
     *name = trans[*name], name++;
 }
 
+#ifdef USE_BISMSG
+/* Gerph: `bis_msg` is not defined anywhere, so this is configured out */
 void bismsg(const char *fmt, ...)
 {
   char buf[256];
@@ -463,6 +465,7 @@ void bismsg(const char *fmt, ...)
   va_end(ap);
   MUST(_swix(bis_msg, _IN(0), buf));
 }
+#endif
 
 //---------------------------------- Linked lists ----------------------------------------
 

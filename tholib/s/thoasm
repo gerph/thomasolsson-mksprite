@@ -1,4 +1,6 @@
-	GET C:h.SWINames
+;	GET C:h.SWINames
+
+XOS_Byte * 6 + 0x20000
 
 ; Some useful macros
 

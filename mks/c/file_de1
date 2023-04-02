@@ -11,6 +11,31 @@
 #define SCALE 4
 
 
+/* Gerph: The Euclid SWIs aren't known here, so here are the definintions */
+#define Euclid_Initialise   (0x80640)
+#define Euclid_Draw         (0x80641)
+#define Euclid_Load         (0x80642)
+#define Euclid_Save         (0x80643)
+#define Euclid_Append       (0x80644)
+#define Euclid_Find         (0x80645)
+#define Euclid_Create       (0x80646)
+#define Euclid_Destroy      (0x80647)
+#define Euclid_Set          (0x80648)
+#define Euclid_Show         (0x80649)
+#define Euclid_Insert       (0x8064A)
+#define Euclid_Delete       (0x8064B)
+#define Euclid_Translate    (0x8064C)
+#define Euclid_Zoom         (0x8064D)
+#define Euclid_Rotate       (0x8064E)
+#define Euclid_List         (0x8064F)
+#define Euclid_BoundingSphere   (0x80650)
+#define Euclid_CloseDown    (0x80651)
+#define Euclid_MiscOp       (0x80652)
+#define Euclid_Compress     (0x80653)
+#define Euclid_Expand       (0x80654)
+
+
+
 /* Move given pixel to where it goes, making
  * sure the destination pixel has already been
  * moved out of the way.

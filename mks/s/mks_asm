@@ -1,5 +1,13 @@
 
-	GET C:h.SWINames
+;	GET C:h.SWINames
+; Gerph: I don't have C:h.SWInames, which appears to be an assembler header for the SWI names.
+;        The ones we use are below.
+
+XOS_EnterOS         *   0x20016
+XOS_SpriteOp        *   0x2002E
+XDrawFile_Render    *   0x65540
+
+
 	GET s.asmhdr
 
 	AREA	|C$$code|, CODE, READONLY
