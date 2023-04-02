@@ -1,0 +1,40 @@
+#ifndef __MKSPRITE_H
+#define __MKSPRITE_H
+
+#define save_sprite(spr, name) _swix(OS_SpriteOp, _INR(0,2), 0x20c, spr, name)
+
+#include "kernel.h"
+#include "tholib.h"
+
+typedef struct {
+  int   a;
+  word  b;
+  int   c;
+  int   m;
+  char *mat;
+  char *n;
+  char *p;
+  int   s;
+  int   v;
+  int   xeig;
+  int   yeig;
+  int   xsize;
+  int   ysize;
+  int   h;
+  char *cmd;
+  char *i;
+  char *o;
+  char *f;
+  char *depend;
+} arg_t;
+
+typedef union {
+  struct {
+    byte r,g,b,a;
+  } ch;
+  word all;
+} pixel_t;
+
+extern word *create_sprite(int xs, int ys, const arg_t *arg);
+
+#endif

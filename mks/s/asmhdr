@@ -1,0 +1,31 @@
+; Some useful macros
+
+	MACRO
+	FUNC $var
+	EXPORT $var
+	DCB "$var",0
+	ALIGN 4
+	DCD &FF000000+(:LEN:"$var"+4):AND::NOT:3
+	ALIGN 16
+$var
+	MEND
+
+	MACRO
+	FUNCEND
+	MEND
+
+	MACRO
+	COPYPAD $dst,$src,$len,$pad
+	MOV R2,#$len
+	MOV R3,$dst
+1	 LDRB R14,[$src],#1
+	 STRB R14,[$dst],#1
+	 TEQ R14,#$pad
+	 MOVNE R3,$dst
+	 SUBS R2,R2,#1
+	BGT %b1
+	MOV R14,#0
+	STRB R14,[R3]
+	MEND
+
+	END

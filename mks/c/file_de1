@@ -1,0 +1,269 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include "math.h"
+#include "string.h"
+#include "swis.h"
+#include "tholib.h"
+#include "mksprite.h"
+#include "mks_asm.h"
+
+#define HEAP_SIZE (1600*1024)
+#define SCALE 4
+
+
+/* Move given pixel to where it goes, making
+ * sure the destination pixel has already been
+ * moved out of the way.
+ */
+static void move_pixel(word *line, int srcx, int xs)
+{
+  int dstx = (srcx < xs/2)? srcx*2 : srcx*2-xs+1;
+  word srcp = (line[srcx] &= ~(1<<24));
+
+  if (line[dstx] & (1<<24))
+    move_pixel(line, dstx, xs);
+  
+  line[dstx] = srcp;
+}  
+
+
+/* Convert the xs*2 by ys*2 8bpp image into
+ * an xs by ys 32bpp one occupying the same
+ * space. This is not exactly trivial:
+ *
+ * 8bpp image (8x8, 64 bytes):
+ *
+ * 00 01 02 03 04 05 06 07
+ * 10 11 12 13 14 15 16 17
+ * 20 21 22 23 24 25 26 27
+ * 30 31 32 33 34 35 36 37
+ * 40 41 42 43 44 45 46 47
+ * 50 51 52 53 54 55 56 57
+ * 60 61 62 63 64 65 66 67
+ * 70 71 72 73 74 75 76 77
+ *
+ * Becomes 32bpp image (4x4, 64 bytes):
+ *
+ * 00+01+10+11 02+03+12+13 04+05+14+15 06+07+16+17
+ * 20+21+30+31 22+23+32+33 24+25+34+35 26+27+36+37
+ * 40+41+50+51 42+43+52+53 44+45+54+55 46+47+56+57
+ * 60+61+70+71 62+63+72+73 64+65+74+75 66+67+76+77
+ *
+ * Can you do this in one smooth motion?
+ */
+static void conv_8to32(word *spr, int xs, int ys)
+{
+  int x,y;
+  word *pic = spr+4+spr[12]/4;
+  
+  for (y=0; y<ys; y++)
+  {
+    word *out = pic+y*xs;
+    byte *in = (byte*)out;
+    
+    for (x=0; x<xs; x+=2)
+    {
+      /* Involved! Weird calculations because half the code thinks
+       * the sprite is a different size and depth.
+       * The words are simply added up, because the table contains
+       * 0, 4, 8 .. 63 rather than 0, 17, 34 .. 255. Same accuracy,
+       * (because the values originate from 4 bits per channel),
+       * but we can avoid summing them seperately and dividing by 4.
+       */
+      word out0 = tab8_32[in[(x     )*2]] + tab8_32[in[(x     )*2+1]] +
+                  tab8_32[in[(x+xs  )*2]] + tab8_32[in[(x+xs  )*2+1]];
+      word out1 = tab8_32[in[(x   +1)*2]] + tab8_32[in[(x   +1)*2+1]] +
+                  tab8_32[in[(x+xs+1)*2]] + tab8_32[in[(x+xs+1)*2+1]];
+      
+      /* This is not the right pixels, because plotting in the right places
+       * would overwrite data we are going to need for other pixels. So we
+       * plot exactly on top of the two words we just read.
+       */
+      *(word*)&in[x*2]      = out0 | (1<<24);
+      *(word*)&in[(xs+x)*2] = out1 | (1<<24);
+    }
+    
+    /* Now fix up the line, moving the pixels to the appropriate places */
+    for (x=0; x<xs; x++)
+    {
+      if (out[x] & (1<<24))
+        move_pixel(out, x, xs);
+    }
+  }
+}
+
+
+/* See if there's a suitable BBox object */
+static _kernel_oserror *find_size(word *blk, int *xs, int *ys)
+{
+  _kernel_oserror *e = NULL;
+  byte *bbox;
+
+  *xs = *ys = 16*SCALE;
+  if (!_swix(Euclid_Find, _INR(1,2)|_OUT(0), blk, "BBox", &bbox))
+  {
+    if (bbox[3] == 0x31)
+    {
+      if (bbox[0] == 1)
+      {
+        const word *vane = (word*)((word*)bbox)[10];
+        int min_x =  32768;
+        int max_x = -32768;
+        int min_z =  32768;
+        int max_z = -32768;
+        int p;
+        
+        for (p=0; p<*((byte*)vane); p++)
+        {
+          int x = vane[4+p*6];
+          int z = vane[6+p*6];
+          
+          if (x<min_x) min_x = x;
+          if (x>max_x) max_x = x;
+          if (z<min_z) min_z = z;
+          if (z>max_z) max_z = z;
+        }
+        *xs = SCALE*(max_x-min_x)/10;
+        *ys = SCALE*(max_z-min_z)/10;       
+      }
+      else
+        e = err(1,"BBox must have 1 vane");
+    }
+    else  
+      e = err(1,"BBox is not a mesh");
+  }
+  return e;
+}
+  
+  
+static word *load_materials(const arg_t *arg)
+{
+  int len = fsize(arg->mat);
+  word *s = NULL;
+  
+  if (len)
+  {
+    word *list = NULL;
+
+    _swi(Euclid_Append, _INR(0,2), 0, 0, arg->mat);
+    _swi(Euclid_List, _INR(0,2)|_OUT(0), 0, 0, 0x62, &list);
+    while (list)
+    {
+      s = list;
+      _swi(Euclid_List, _INR(0,2)|_OUT(0), list, 0, 0x62, &list);
+    }
+  }
+  
+  if (!s)
+  {
+    byte *n;
+    
+    _swi(Euclid_MiscOp, _IN(0)|_OUT(0), 2, &n);
+    _swi(Euclid_Create, _INR(0,2)|_OUT(0), *n, 0, 0x62, &s);
+    memcpy(s+1, n+1, *n * 44);
+  }
+  
+  while (*(char*)s < 15)
+  {
+    char *name;
+    
+    _swi(Euclid_Insert, _INR(0,2)|_OUT(0), *(char*)s, 0, s, &name);
+    strcpy(name, "<Undefined>\r");
+  }
+  return s;  
+}
+
+
+word *convert_de1(const arg_t *arg, _kernel_oserror **e)
+{
+  word *blk;
+  
+  if (arg->v)
+    fprintf(stderr, "Input is an Euclid file\n");
+
+  if (!system("RMEnsure Euclid 2.16 RMLoad Euclid"))
+  {
+    if (blk = malloc(HEAP_SIZE))
+    {
+      if (!(*e = _swix(Euclid_Initialise, _INR(0,2), 0, blk, HEAP_SIZE)))
+      {
+        if (!(*e = _swix(Euclid_Load, _INR(0,2), 0, blk, arg->i)))
+        {
+          int xs, ys;
+          
+          if (!(*e = find_size(blk, &xs, &ys)))
+          {
+            word *spr;
+  
+            xs >>= (arg->xeig-1);
+            ys >>= (arg->yeig-1);
+  
+            if (arg->v)
+              fprintf(stderr, "Using size %d x %d\n", xs/SCALE, ys/SCALE);
+  
+            if (spr = create_sprite(xs, ys, arg))
+            {
+              word vdu[16];
+  
+              /* Pretend this is an 8bpp screen of size xs*2 by ys*2 */
+              vdu[0] = (word)(spr+4+spr[12]/4);	/* starts in same place */
+              vdu[1] = xs*ys*4;			/* same size in bytes */
+              vdu[2] = xs*2;			/* lines are xs*2 bytes long */
+              vdu[3] = 0;			/* left edge */
+              vdu[4] = 0;			/* bottom edge */
+              vdu[5] = xs*2-1;			/* right edge */
+              vdu[6] = ys*2-1;			/* top edge */
+              vdu[7] = 3;			/* 8bpp */
+              vdu[8] = 3;			/* 8bpc */
+              vdu[9] = 0;			/* origin 0,0 */
+              vdu[10]= 0;
+              vdu[11]= arg->xeig;		/* xeig  */
+              vdu[12]= arg->yeig;		/* yeig  */
+              vdu[13]= vdu[6];			/* why? */
+              vdu[14]= -1;
+                 
+              memset(&blk[5], 0, 7*sizeof(int));
+              blk[8]  = 0x4000*SCALE*2/3;	/* Zoom */
+              blk[12] = 11;			/* Lens */
+              blk[22] = 0;			/* Flatness */
+  
+              if (blk[18] = (word)load_materials(arg))
+              {
+                if (!(*e = _swix(Euclid_MiscOp, _INR(0,2), 7, 0x200108, 64)))
+                {
+                  const char *camera = "$.!Camera";
+                  const word style = (2<<1)|(1<<30);
+                  const int xpos = (xs<<arg->xeig)-1;
+                  const int ypos = (ys<<arg->yeig)-1;
+                  int more;
+                      
+                  if (!(*e = _swix(Euclid_Draw, _INR(0,5)|_OUT(0), style | 0x1000, blk, xpos, ypos, camera, vdu, &more)))
+                  {
+                    while (more)
+                      _swix(Euclid_Draw, _INR(0,5)|_OUT(0), style | 0x64800, blk, xpos, ypos, camera, vdu, &more);
+  
+                    _swix(Euclid_CloseDown, 0);
+                    conv_8to32(spr, xs, ys);
+                    free(blk);
+                    return spr;
+                  }
+                }
+              }
+              else
+                *e = err(1,"Can't create materials\n");
+            }
+            else
+              *e = err(1,"Can't create sprite\n");
+          }           
+        }
+      }
+    }
+    else
+      *e = err(1,"Can't get heap block\n");
+  }
+  else
+    *e = err(1,"Can't load Euclid module\n");
+  return NULL;
+}
+
+

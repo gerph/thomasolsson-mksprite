@@ -1,0 +1,595 @@
+/* "tholib" 1.00 (24 Feb 2000)
+ *
+ * Various utility functions
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <string.h>
+#include "kernel.h"
+#include "ctype.h"
+#include "swis.h"
+
+#include "tholib.h"
+
+err_t *err_last = NULL;
+FILE  *err_output = NULL;
+
+err_t *err(int num, const char *msg,...)
+{
+  static err_t err;
+  va_list ap;
+
+  err.errnum = num;
+  va_start(ap, msg);
+  vsprintf(err.errmess, msg, ap);
+  va_end(ap);
+  return &err;
+}
+
+void err_pd(const char *fmt, ...)
+{
+  if (err_output) {
+    va_list ap;
+
+    va_start(ap, fmt);
+    vfprintf(err_output, fmt, ap);
+    va_end(ap);
+    fflush(err_output);
+  }
+}
+
+// add file and line info to error block
+int err_setline(err_t *e, const char *file, unsigned long line)
+{
+  char msg[64];
+
+  sprintf(msg, " [%s:%ld]", file, line);
+  strcat(e->errmess, msg);
+  return 1;
+}
+
+// Show wimp error box
+void err_show(const err_t *err)
+{
+  err_pd("Error %x: %s\n", err->errnum, err->errmess);
+  _swi(Wimp_ReportError, _INR(0,5), err, 0, "Application", 0, 0, 0);
+}
+
+// Report error if any, and clear it
+void err_report(void)
+{
+  if (err_last) {
+    err_show(err_last);
+    err_last = NULL;
+  }
+}
+
+// Log error if any, and clear it
+void err_log(void)
+{
+  if (err_last) {
+    err_pd("Error %x: %s\n", err_last->errnum, err_last->errmess);
+    err_last = NULL;
+  }
+}
+
+void err_fatal(void)
+{
+  err_report();
+  exit(1);
+}
+
+char *strdup(const char *str)
+{
+  int len = strlen(str);
+  char *s = malloc(len+1);
+
+  if (s)
+    return memcpy(s, str, len+1);
+  return s;
+}
+
+char *strdup_n(const char *str)
+{
+  return str? strdup(str) : NULL;
+}
+
+char *strndup(const char *str, int len)
+{
+  char *s = malloc(len+1);
+
+  if (s)
+  {
+    memcpy(s, str, len);
+    s[len] = 0;
+  }
+  return s;
+}
+
+// dups control-terminated string
+char *strcdup(const char *str)
+{
+  const char *p = str;
+
+  while (*p > 31 && *p != 127)
+    p++;
+  return strndup(str, p-str);
+}
+
+char *strapp(char *s1, const char *s2)
+{
+  if (s1 = realloc(s1, strlen(s1) + strlen(s2) + 1))
+    strcat(s1, s2);
+  return s1;
+}
+
+int strcasecmp(const char *s1, const char *s2)
+{
+  while (*s1 && tolower(*s1) == tolower(*s2))
+    s1++, s2++;
+  return tolower(*s1)-tolower(*s2);
+}
+
+int strncasecmp(const char *s1, const char *s2, size_t n)
+{
+  while (n && *s1 && tolower(*s1) == tolower(*s2))
+    s1++, s2++, n--;
+  return n? tolower(*s1)-tolower(*s2) : 0;
+}
+
+void upcase(char *str)
+{
+  while (*str = toupper(*str))
+    str++;
+}
+
+void locase(char *str)
+{
+  while (*str = tolower(*str))
+    str++;
+}
+
+err_t *read_args(const char *arg, const char *format, void *array)
+{
+  int space[64];
+  void **result = array;
+  char **list = (char**)space;
+
+  DO(_swix(OS_ReadArgs, _INR(0,3), format, arg, space, 256));
+  do
+  {
+    int type = -1;
+
+    while (type < 0)
+    {
+      switch (*format)
+      {
+        case 0:
+        case ',':
+          type = 0;
+          break;
+
+        case '/':
+          switch (format[1])
+          {
+            case 's':
+            case 'S':
+              type = 1;
+              break;
+
+            case 'g':
+            case 'G':
+              type = 2;
+              break;
+
+            case 'e':
+            case 'E':
+              type = 3;
+              break;
+          }
+          format+=2;
+          break;
+
+        default:
+          format++;
+          break;
+      }
+    }
+    while (*format && *format != ',')
+      format++;
+    if (*format)
+      format++;
+
+    switch (type)
+    {
+      case 0: /* string */
+        if (*list)
+          *result = strdup(*list);
+        break;
+
+      case 1: /* switch */
+        *result = (void*)!!*list;
+        break;
+
+      case 2: /* gstrans */
+        if (*list)
+          *result = strndup(*list+2, **list + ((*list)[1]<<8));
+        break;
+
+      case 3: /* eval */
+        if (*list && !**list)
+          *result = (void*)((*list)[1]      + ((*list)[2]<<8) +
+                           ((*list)[3]<<16) + ((*list)[4]<<24));
+        break;
+    }
+    result++;
+    list++;
+  } while (*format);
+
+  return NULL;
+}
+
+word fsize(const char *filename)
+{
+  word size,type;
+
+  _swi(OS_File,_INR(0,1)|_OUT(0)|_OUT(4),5,filename,&type,&size);
+
+  if (type!=1)
+    return 0;
+
+  return size;
+}
+
+word fobjtype(const char *filename)
+{
+  return _swi(OS_File,_INR(0,1)|_RETURN(0),5,filename);
+}
+
+int ftype(const char *filename)
+{
+  int type;
+
+  if (_swix(OS_File,_IN(0)|_IN(1)|_OUT(6),20,filename,&type))
+    return -1;
+
+  return type;
+}
+
+void settype(const char *filename, int type)
+{
+  os_file(18, filename, type, 0);
+}
+
+err_t *fload(const char *filename, void *buffer)
+{
+  return _swix(OS_File, _INR(0,3), 255, filename, buffer, 0);
+}
+
+err_t *fsave(const char *filename, int type, const void *buffer, size_t size)
+{
+  return _swix(OS_File, _INR(0,5), 10, filename, type, 0, buffer, (const char*)buffer + size);
+}
+
+err_t *cdir(const char *dirname)
+{
+  return _swix(OS_File, _INR(0,2), 8, dirname, 0);
+}
+
+int wcmps(const char *test, const char *wild)
+{
+  if (!*test)
+  {
+    if (*wild == '*')
+      return wcmps(test, wild+1);
+    else
+      return (!*wild);
+  }
+  if (!*wild)
+    return 0;
+  if (*test == *wild || *wild == '#')
+    return wcmps(test+1, wild+1);
+  if (*wild != '*')
+    return 0;
+  return wcmps(test, wild+1) || wcmps(test+1, wild);
+}
+
+int wcmpi(const char *test, const char *wild)
+{
+  if (!*test)
+  {
+    if (*wild == '*')
+      return wcmpi(test, wild+1);
+    else
+      return (!*wild);
+  }
+  if (!*wild)
+    return 0;
+  if (tolower(*test) == tolower(*wild) || *wild == '#')
+    return wcmpi(test+1, wild+1);
+  if (*wild != '*')
+    return 0;
+  return wcmpi(test, wild+1) || wcmpi(test+1, wild);
+}
+
+int modevar(int mode, int var)
+{
+  return _swi(OS_ReadModeVariable, _INR(0,1)|_RETURN(2), mode, var);
+}
+
+int vduvar(int var)
+{
+  int block[2] = { 0, -1 };
+
+  block[0] = var;
+  os_readvduvariables(block, block);
+  return block[0];
+}
+
+static void ds_catname(char *name, const char *base, const char *leaf)
+{
+  int bl = strlen(base);
+  int ll = strlen(leaf);
+
+  memcpy(name, base, bl);
+  name[bl] = '.';
+  memcpy(name + bl + 1, leaf, ll + 1);
+}
+
+void *ds_scan(const char *base, ds_callback *cb, void *data, word flags)
+{
+  char blk[2048];
+  void *rtn = NULL;
+  int ofs = 0;
+  int num;
+
+  do
+  {
+    gbpb10_info *ptr = (gbpb10_info*) blk;
+
+    if (_swix(OS_GBPB, _INR(0,6)|_OUTR(3,4), 10, base, blk, 256, ofs, 2048, NULL, &num, &ofs))
+      return NULL;
+
+    while (num > 0 && !rtn)
+    {
+      char *leaf = &ptr->name;
+
+      switch (ptr->type)
+      {
+        case 1:
+        {
+          if (flags & DS_FILE)
+          {
+            char name[256];
+
+            ds_catname(name, base, leaf);
+            rtn = cb(1, name, data, ptr);
+          }
+          break;
+        }
+        case 2:
+        {
+          if (flags & (DS_ENTERDIR | DS_RECDIR | DS_LEAVEDIR))
+          {
+            char name[256];
+
+            ds_catname(name, base, leaf);
+            if (flags & DS_ENTERDIR)
+              rtn = cb(2, name, data, ptr);
+            if ((flags & DS_RECDIR) && !rtn)
+              rtn = ds_scan(name, cb, data, flags);
+            if ((flags & DS_LEAVEDIR) && !rtn)
+              rtn = cb(4, name, data, ptr);
+          }
+          break;
+        }
+        case 3:
+        {
+          if (flags & (DS_ENTERIMAGE | DS_RECIMAGE | DS_LEAVEIMAGE))
+          {
+            char name[256];
+
+            ds_catname(name, base, leaf);
+            if (flags & DS_ENTERIMAGE)
+              rtn = cb(3, name, data, ptr);
+            if ((flags & DS_RECIMAGE) && !rtn)
+              rtn = ds_scan(name, cb, data, flags);
+            if ((flags & DS_LEAVEIMAGE) && !rtn)
+              rtn = cb(5, name, data, ptr);
+          }
+          break;
+        }
+      }
+      ptr = (gbpb10_info*)( (char*)ptr + ((24 + strlen(leaf)) & ~3));
+      num--;
+    }
+  } while (ofs != -1 && !rtn);
+  return rtn;
+}
+
+void ensureparent(const char *name)
+{
+  char *ld = strrchr(name, '.');
+
+  if (ld)
+  {
+    char parent[256];
+
+    memcpy(parent, name, ld-name);
+    parent[ld-name] = 0;
+    if (!fobjtype(parent))
+    {
+      ensureparent(parent);
+      cdir(parent);
+    }
+  }
+}
+
+void transfile(char *name)
+{
+  static char trans[256] =
+  {
+     000,  'a',  'b',  'c',  'd',  'e',  'f',  'g',  'h',  'i',  'j',  'k',  'l',  'm',  'n',  'o',	// 000 .. 017
+     'p',  'q',  'r',  's',  't',  'u',  'v',  'w',  'x',  'y',  'z',  '{',  '¶',  '}',  'Ø',  '_',	// 020 .. 037
+     '†',  '!',  'ï',  'ù',  'ß',  'é',  '+',  047,  '(',  ')',  'è',  '+',  ',',  '-',  '/',  '/',	// 040 .. 057
+     '0',  '1',  '2',  '3',  '4',  '5',  '6',  '7',  '8',  '9',  ';',  ';',  '<',  '=',  '>',  '?',	// 060 .. 077
+     'a',  'A',  'B',  'C',  'D',  'E',  'F',  'G',  'H',  'I',  'J',  'K',  'L',  'M',  'N',  'O',	// 100 .. 117
+     'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W',  'X',  'Y',  'Z',  '[',  '`',  ']',  'Ø',  '_',	// 120 .. 137
+     '`',  'a',  'b',  'c',  'd',  'e',  'f',  'g',  'h',  'i',  'j',  'k',  'l',  'm',  'n',  'o',	// 140 .. 157
+     'p',  'q',  'r',  's',  't',  'u',  'v',  'w',  'x',  'y',  'z',  '{',  '¶',  '}',  '~',  'à',	// 160 .. 177
+    0200, 0201, 0202, 0203, 0204, 0205, 0206, 0207, 0210, 0211, 0212, 0213, 0214, 0215, 0216, 0217,
+    0220, 0221, 0222, 0223, 0224, 0225, 0226, 0227, 0230, 0231, 0232, 0233, 0234, 0235, 0236, 0237,
+    0240, 0241, 0242, 0243, 0244, 0245, 0246, 0247, 0250, 0251, 0252, 0253, 0254, 0255, 0256, 0257,
+    0260, 0261, 0262, 0263, 0264, 0265, 0266, 0267, 0270, 0271, 0272, 0273, 0274, 0275, 0276, 0277,
+    0300, 0301, 0302, 0303, 0304, 0305, 0306, 0307, 0310, 0311, 0312, 0313, 0314, 0315, 0316, 0317,
+    0320, 0321, 0322, 0323, 0324, 0325, 0326, 0327, 0330, 0331, 0332, 0333, 0334, 0335, 0336, 0337,
+    0340, 0341, 0342, 0343, 0344, 0345, 0346, 0347, 0350, 0351, 0352, 0353, 0354, 0355, 0356, 0357,
+    0360, 0361, 0362, 0363, 0364, 0365, 0366, 0367, 0370, 0371, 0372, 0373, 0374, 0375, 0376, 0377
+  };
+
+  while (*name)
+    *name = trans[*name], name++;
+}
+
+void bismsg(const char *fmt, ...)
+{
+  char buf[256];
+  va_list ap;
+
+  va_start(ap, fmt);
+  vsprintf(buf, fmt, ap);
+  va_end(ap);
+  MUST(_swix(bis_msg, _IN(0), buf));
+}
+
+//---------------------------------- Linked lists ----------------------------------------
+
+// All list pointers are void*, pointing to two words, a prev and a next link,
+// like this:
+typedef struct list_s
+{
+  struct list_s *prev;
+  struct list_s *next;
+} list_t;
+
+void ll_initlist(void *h)
+{
+  list_t *head = h;
+
+  head->prev = head->next = head;
+}
+
+void ll_unlink(void *d)
+{
+  list_t *data = d;
+
+  data->prev->next = data->next;
+  data->next->prev = data->prev;
+}
+
+void ll_addafter(void *h, void *d)
+{
+  list_t *head = h;
+  list_t *data = d;
+
+  data->prev = head;
+  data->next = head->next;
+  head->next->prev = data;
+  head->next = data;
+}
+
+void ll_addbefore(void *h, void *d)
+{
+  list_t *head = h;
+  list_t *data = d;
+
+  data->next = head;
+  data->prev = head->prev;
+  head->prev->next = data;
+  head->prev = data;
+}
+
+// add h2 list before h1. h2 is unlinked afterwards
+void ll_addllbefore(void *h1, void *h2)
+{
+  list_t *head1 = h1;
+  list_t *head2 = h2;
+
+  head2->prev->next = head1;
+  head2->next->prev = head1->prev;
+  head1->prev->next = head2->next;
+  head1->prev = head2->prev;
+}
+
+void *ll_foreach(void *h, void *(*callback)(void *, void *), void *metadata)
+{
+  list_t *head = h;
+  list_t *data = head->next;
+
+  while (data != head)
+  {
+    void *rtn;
+
+    if (rtn = callback(data, metadata))
+      return rtn;
+    data = data->next;
+  }
+  return NULL;
+}
+
+static void sortlist(list_t *left, list_t *right, int bit, int (*getbit)(const void *, int))
+{
+  list_t *last0 = right;
+
+  if (left == right)
+    return;
+
+  // find the last 0
+  while (last0 != left && getbit(last0, bit))
+    last0 = last0->prev;
+  if (last0 == left) {
+    // last 0 is either missing or first item, so list is ordered
+    if (bit > 0) {
+      if (getbit(left, bit)) {
+        sortlist(left, right, bit-1, getbit);		// missing, do the whole block again
+      } else {
+        sortlist(left->next, right, bit-1, getbit);	// only one 0, do the rest
+      }
+    }
+    return;
+  } else {
+    list_t *prevleft = left->prev;
+    list_t *nextright = right->next;
+    list_t *first1 = left;
+
+    // find the first 1
+    while (first1 != last0) {
+      while (first1 != last0 && !getbit(first1, bit))
+        first1 = first1->next;
+      if (first1 != last0) {
+        list_t *next = first1->next;
+
+        // move 1-item to the end
+        ll_unlink(first1);
+        ll_addafter(right, first1);
+        first1 = next;
+      }
+    }
+    // list is now 0 from prevleft->next to last0 and 1 after that up to nextright->prev
+    if (bit > 0) {
+      if (last0 != nextright->prev)
+        sortlist(last0->next, nextright->prev, bit-1, getbit);
+      sortlist(prevleft->next, last0, bit-1, getbit);
+    }
+  }
+}
+
+void ll_sort(void *h, int msb, int (*getbit)(const void *item, int bit))
+{
+  list_t *head = h;
+
+  sortlist(head->next, head->prev, msb, getbit);
+}
+

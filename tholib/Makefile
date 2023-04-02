@@ -1,0 +1,40 @@
+
+DEP=	-depend !Depend
+#DC	=-g
+#DA	=-G
+#DL	=-Debug
+DBG	=0
+
+# Toolflags:
+CFLAGS = $(DC) -IC: -throwback -DDEBUG=$(DBG) -Wpad -fa -ep -Ospace $(DEP)
+ASFLAGS = $(DA) -throwback $(DEP) -cpu ARM7M
+CMHGflags = -throwback -p -IC: $(DEP)
+LFFLAGS = -c -o $@
+
+.SUFFIXES: .o .oz .c .s .cmhg
+.c.o:;		cc $(CFLAGS) -c -o $@ $<
+.c.oz:;		cc $(CFLAGS) -zM -c -o $@ $<
+.cmhg.o:;	cmhg $(CMHGFLAGS) -o $@ $<
+.c.s:;		cc $(CFLAGS) -S -o $@ $<
+.s.o:;		objasm $(ASFLAGS) -o $@ $<
+
+TL_OBJ=		o.tho o.thoasm
+
+# Final targets:
+all:	o.tholib
+
+# Static dependencies:
+o.tholib:	$(TL_OBJ)
+		libfile $(LFFLAGS) $(TL_OBJ)
+
+# Dynamic dependencies:
+o.tho:	c.tho
+o.tho:	C:h.kernel
+o.tho:	C:h.ctype
+o.tho:	C:h.swis
+o.tho:	h.tholib
+o.tho:	C:h.kernel
+o.tho:	C:h.time
+o.tho:	C:h.swis
+o.thoasm: s.thoasm
+o.thoasm: C:h.SWINames

@@ -1,0 +1,109 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include "tholib.h"
+#include "mksprite.h"
+#include "mks_asm.h"
+
+word *convert_aff(const arg_t *arg, _kernel_oserror **e)
+{
+  int len;
+
+  if (arg->v)
+    fprintf(stderr, "Input is a drawfile\n");
+
+  if ((len = fsize(arg->i)) >= 24)
+  {
+    word *draw;
+
+    if (draw = malloc(len))
+    {
+      if (!(*e = _swix(OS_File, _INR(0,3), 255, arg->i, draw, 0)))
+      {
+        int bbox[4];
+
+        if (!(*e = _swix(DrawFile_BBox, _INR(0,4), 0, draw, len, 0, bbox)))
+        {
+          static int trans[6] = {0,0,0,0,0,0};
+          int xs = bbox[2]-bbox[0];
+          int ys = bbox[3]-bbox[1];
+
+          if (xs && ys)
+          {
+            int xout = arg->xsize * 256;
+            int yout = arg->ysize * 256;
+            float scale = 1.0f;
+            word *spr;
+
+            if (xout && yout)
+            {
+              scale = (float)xout / (float)xs;
+              if (ys * scale > yout)
+                scale = (float)yout / (float)ys;
+            }
+            else if (xout)
+              scale = (float)xout / (float)xs;
+            else if (yout)
+              scale = (float)yout / (float)ys;
+
+            if (scale != 1)
+            {
+              trans[3] = trans[0] = (int)(0x40000 * scale);
+              if (xout)
+              {
+                trans[4] = 2 * ((int)((float)(-2 * bbox[0] - xs) * scale) + xout);
+                xs = xout;
+              }
+              else
+              {
+                trans[4] = -4 * (int)(bbox[0] * scale);
+                xs = (int)(xs * scale);
+              }
+
+              if (yout)
+              {
+                trans[5] = 2 * ((int)((float)(-2 * bbox[1] - ys) * scale) + yout);
+                ys = yout;
+              }
+              else
+              {
+                trans[5] = -4 * (int)(bbox[1] * scale);
+                ys = (int)(ys * scale);
+              }
+            }
+            else
+            {
+              trans[3] = trans[0] = 0x40000;
+              trans[4] = -4 * bbox[0];
+              trans[5] = -4 * bbox[1];
+            }
+
+            xs >>= arg->xeig;
+            ys >>= arg->yeig;
+            xs += 128;
+            ys += 128;
+            xs >>= 8;
+            ys >>= 8;
+
+            if (spr = create_sprite(xs*4, ys*4, arg))
+            {
+              render_aff(spr, draw, len, trans);
+              free(draw);
+              return spr;
+            }
+            else
+              *e = err(1,"Could not get memory for sprite\n");
+          }
+          else
+            *e = err(1,"Draw file is less than 2 dimensional\n");
+        }
+      }
+    }
+    else
+      *e = err(1,"Could not get memory to load file\n");
+  }
+  else
+    *e = err(1,"File is too short\n");
+  return NULL;
+}
+
+

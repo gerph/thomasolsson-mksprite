@@ -1,0 +1,546 @@
+/* mksprite © 2000 Thomas Olsson
+ *
+ * Converts files into sprites. Source files currently supported:
+ * Drawfiles.
+ * Euclid.
+ *
+ * Things to do:
+ * Support sprites as input
+ * Output 32bpp sprites?
+ * Use palette from a given sprite file
+ * do the spanners trick with an extra line in file_de1
+ * use DA for big sprites
+ */
+
+#define VERSION "1.09"
+
+#include <stdlib.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <math.h>
+#include "swis.h"
+
+#include "tholib.h"
+
+#include "mksprite.h"
+#include "mks_asm.h"
+#include "file_aff.h"
+#include "file_de1.h"
+
+#define sq(x) ((x)*(x))
+
+#define POINT(spr, x, y) (*(spr+4+spr[12]/4+(x)+(spr[9]-(y))*(spr[8]+1)))
+
+static struct {
+  int type;
+  word *(*doit)(const arg_t *arg, _kernel_oserror **e);
+} converters[] = {
+  { 0xaff, convert_aff },
+  { 0xde1, convert_de1 },
+  { 0, NULL }
+};
+
+
+static void spr_clg(word *spr, word col)
+{
+  word ws = (spr[8]+1)*(spr[9]+1);
+  word *bitmap = spr+4+spr[12]/4;
+  int i;
+
+  for (i=0; i<ws; i++)
+    bitmap[i] = col;
+}
+
+
+/* Create 16bpp sprite cleared to background colour
+ * (and transparent if mask is on)
+ */
+word *create_sprite(int xs, int ys, const arg_t *arg)
+{
+  static int mode[] = {1,0,0,5,-1,4,1,5,1,-1};
+  int size = 64+xs*ys*4;
+  word *spr = malloc(size);
+
+  if (spr)
+  {
+    spr[0] = size;
+    spr[2] = 16;
+    _swi(OS_SpriteOp, _INR(0,1), 0x209, spr);
+    mode[6] = arg->xeig;
+    mode[8] = arg->yeig;
+    _swi(OS_SpriteOp, _INR(0,6), 0x10f, spr, arg->n, 0, xs, ys, mode);
+
+    spr_clg(spr, arg->b | 0x01000000);
+  }
+  else
+    fprintf(stderr, "malloc of %d bytes failed\n", size);
+  return spr;
+}
+
+
+/* Copy list of pixels to palette */
+static void write_palette(word *spr, const pixel_t *pal, int ncol)
+{
+  int i;
+
+  for (i=0; i<ncol; i++)
+    spr[15+i*2] = spr[16+i*2] = pal[i].all << 8;
+}
+
+
+/* Compare two pixels */
+static int pix_cmp(const void *vp1, const void *vp2)
+{
+  const pixel_t *p1 = vp1;
+  const pixel_t *p2 = vp2;
+
+  return (sq(p1->ch.r)+sq(p1->ch.g)+sq(p1->ch.b)) -
+         (sq(p2->ch.r)+sq(p2->ch.g)+sq(p2->ch.b));
+}
+
+
+/* Return nearest pixel */
+static int nearest(const pixel_t *pal, int ncol, pixel_t p, int lim)
+{
+  if (!ncol)
+    return -1;
+
+  {
+    int md = 0x7fffffff;
+    int mi = -1;
+    int i;
+
+    for (i=0; i<ncol; i++)
+    {
+      int d = sq(pal[i].ch.r - p.ch.r) +
+              sq(pal[i].ch.g - p.ch.g) +
+              sq(pal[i].ch.b - p.ch.b);
+      if (d < md)
+        md = d, mi = i;
+    }
+    if (sqrt(md) <= lim)
+      return mi;
+    return -1;
+  }
+}
+
+
+/* Register colours within limit */
+static void alloc_cols(const word *spr, pixel_t *pal, int xs, int ys, int *ncol, int lim)
+{
+  int x,y;
+
+  for (y=0; y<ys; y++)
+  {
+    for (x=0; x<xs; x++)
+    {
+      pixel_t p;
+      int n;
+
+      p.all = POINT(spr, x, y);
+      if (!p.ch.a)
+      {
+        n = nearest(pal, *ncol, p, lim);
+        if (n == -1)
+        {
+          pal[(*ncol)++] = p;
+          if (*ncol > 256)
+            return;
+        }
+      }
+    }
+  }
+}
+
+
+/* Convert from 32bpp to 1-8 bpp depending on colour usage.
+ * Note bit24 contains mask bit.
+ */
+static word *tidy_sprite(word *spr, const arg_t *arg, int xs, int ys)
+{
+  int ncol = 0;
+  int bpp, l2bpp;
+  int lim = arg->a;
+  static pixel_t pal[256];
+  int tsprs = xs*ys*2 + 4096;
+  word *tspr = malloc(tsprs);
+
+  if (!tspr)
+    return NULL;
+
+  if (!arg->p)
+  {
+    if (!arg->c)
+    {
+      alloc_cols(spr, pal, xs, ys, &ncol, lim);
+      if (ncol > 256)
+        return spr;
+      if (ncol < 2)
+        ncol = 2;
+      bpp = magnitude(ncol);
+      l2bpp = magnitude(bpp);
+      bpp = 1<<l2bpp;
+      if (arg->v)
+        fprintf(stderr, "%d colours within limit, using %d\n", ncol, 1<<bpp);
+    }
+    else
+    {
+      bpp = magnitude(arg->c);
+      l2bpp = magnitude(bpp);
+      bpp = 1<<l2bpp;
+    }
+  }
+  else
+  {
+    /* Force specific palette */
+    FILE *f;
+
+    if (f = fopen(arg->p, "rb"))
+    {
+      while (!feof(f))
+      {
+        int col;
+
+        if (fgetc(f) != 19)
+          break;
+        col = fgetc(f);
+        if (fgetc(f) == 16)
+        {
+          pal[ncol].ch.r = fgetc(f);
+          pal[ncol].ch.g = fgetc(f);
+          pal[ncol].ch.b = fgetc(f);
+          pal[ncol++].ch.a = 0;
+        }
+        else
+          fseek(f, 3, SEEK_CUR);
+      }
+      fclose(f);
+
+      if (!ncol)
+        return NULL;
+
+      bpp = magnitude(arg->c? arg->c : ncol);
+      l2bpp = magnitude(bpp);
+      bpp = 1<<l2bpp;
+      if (arg->v)
+        fprintf(stderr, "%d colours in supplied palette, using %d\n", ncol, 1<<bpp);
+    }
+    else
+      return NULL;
+  }
+
+  {
+    int cl = lim;
+
+    while (ncol < (1<<bpp) && cl >= 0)
+      alloc_cols(spr, pal, xs, ys, &ncol, cl--);
+  }
+
+  ncol = 1<<bpp;
+
+  if (arg->s)
+    qsort(pal, ncol, sizeof(pixel_t), pix_cmp);
+
+  {
+    static int mode[] = {1,0,0,0,-1,3,128,4,1,5,1,-1,-1};
+    int x,y;
+    int mask = 0;
+
+    mode[1] = xs;
+    mode[2] = ys;
+    mode[3] = l2bpp;
+    mode[8] = arg->xeig;
+    mode[10] = arg->yeig;
+    tspr[0] = tsprs;
+    tspr[2] = 16;
+    _swi(OS_SpriteOp, _INR(0,1), 0x209, tspr);
+    _swi(OS_SpriteOp, _INR(0,6), 0x10f, tspr, arg->n, 0, xs, ys, mode);
+    _swi(OS_SpriteOp, _INR(0,3), 0x225, tspr, tspr+4, 0x80000000);
+    write_palette(tspr, pal, ncol);
+    for (y=0; y<ys; y++)
+    {
+      for (x=0; x<xs; x++)
+      {
+        pixel_t p;
+
+        p.all = POINT(spr, x, y);
+
+        if (p.ch.a && !mask)
+        {
+          /* ooh, a transparent pixel. better create a mask then */
+          _swi(OS_SpriteOp, _INR(0,2), 0x21d, tspr, tspr+4);
+          mask = 1;
+        }
+
+        if (p.ch.a)
+          _swi(OS_SpriteOp, _INR(0,5), 0x22c, tspr, tspr+4, x, y, 0);
+        else
+        {
+          int n = nearest(pal, ncol, p, lim);
+          _swi(OS_SpriteOp, _INR(0,6), 0x22a, tspr, tspr+4, x, y, n, 0);
+        }
+      }
+    }
+  }
+  return tspr;
+}
+
+/* Scale 4 times down. Preserve mask in bit24 */
+static _kernel_oserror *super_sample(const word *in, word *out, int xs, int ys, int masklvl)
+{
+  int x,y;
+
+  for (y=0; y<ys; y++)
+  {
+    for (x=0; x<xs; x++)
+    {
+      word r=0, g=0, b=0, m=0;
+      int x0,y0;
+
+      for (y0=0; y0<4; y0++)
+      {
+        for (x0=0; x0<4; x0++)
+        {
+          word c = POINT(in, x*4+x0, y*4+y0);
+
+          r += c     & 0xff;
+          g += c>>8  & 0xff;
+          b += c>>16 & 0xff;
+          m += c>>24;
+        }
+      }
+
+      if (r&8) r+=16;
+      r >>= 4;
+      if (g&8) g+=16;
+      g >>= 4;
+      if (b&8) b+=16;
+      b >>= 4;
+      m = (m >= masklvl);
+
+      POINT(out, x, y)=r | g<<8 | b<<16 | m<<24;
+    }
+  }
+  return NULL;
+}
+
+
+/* Supersample, tidy and save
+ *
+ * Note input sprite is 4 times larger than xs,ys,
+ * and it contains the mask in bit24
+ */
+static _kernel_oserror *post_process(word *spr, const arg_t *arg)
+{
+  _kernel_oserror *e = NULL;
+  word *nspr;
+  int xs = (spr[8]+1)/4;
+  int ys = (spr[9]+1)/4;
+
+  if (nspr = create_sprite(xs, ys, arg))
+  {
+    if (!(e = super_sample(spr, nspr, xs, ys, arg->m)))
+    {
+      word *tspr;
+
+      free(spr);
+
+      if (tspr = tidy_sprite(nspr, arg, xs, ys))
+        e = save_sprite(tspr, arg->o);
+      else
+        e = err(1,"Could not tidy sprite\n");
+    }
+  }
+  else
+    e = err(1,"Could not create sprite\n");
+  return e;
+}
+
+
+/* -------------------------------------------------------------------------------------------- */
+
+void usage(const _kernel_oserror *e)
+{
+  printf("mksprite "VERSION" ("__DATE__") © Thomas Olsson\n\n");
+  if (e)
+    printf("%s\n\n", e->errmess);
+
+  _swi(OS_PrettyPrint, _INR(0,2),
+       "\33\36options] <infile> [-o] <outfile>\r"
+       "Options include:\r"
+       "-a <accuracy>		Set colour matching accuracy in percent (default 8%).\r"
+       "-b <&rrggbb>		Set background colour (default &ffffff).\r"
+       "-c <colours>		Force number of colours used to <colours>.\r"
+       "-depend <file>		Output list of dependencies to <file>.\r"
+       "-f <file>		Read control file and get further options from that.\r"
+       "-h			Print this text and exit.\r"
+       "-m <level>		Output a sprite with a mask. <level> is the intensity required before "
+       				"pixels are considered solid.\r"
+       "-mat <file>		Use materials defined in <file>.\r"
+       "-n <name>		Ensure sprite is called <name>.\r"
+       "-p <file>		Force use of the palette in <file>.\r"
+       "-s			Sort palette by brightness.\r"
+       "-v			Output information to stderr (otherwise silent).\r"
+       "-xeig <factor>		Use <factor> as XEig value instead of 1.\r"
+       "-yeig <factor>		Use <factor> as YEig value instead of 1.\r"
+       "-xsize <os-units>	Output a sprite of given width.\r"
+       "-ysize <os-units>	Output a sprite of given height.\r"
+  ,0,"mksprite");
+  exit(1);
+}
+
+int main(int argc, char *argv[])
+{
+  _kernel_oserror *e;
+
+  #define OPTIONS        "a/k/e,b/k/e,c/k/e,m/k/e,mat/k,n/k,p/k,s/s,v/s,xeig/k/e,yeig/k/e,xsize/k/e,ysize/k/e"
+  #define OPTIONS_NOCTRL "h/s,/a,/a,o/a,f/k,depend/k"
+  static arg_t arg =
+  {
+    8,		/* a       */
+    0xffffff,	/* b       */
+    0,		/* c       */
+    0,		/* m       */
+    NULL,	/* mat     */
+    NULL,	/* n       */
+    NULL,	/* p       */
+    0,		/* s       */
+    0,		/* v       */
+    1,		/* xeig    */
+    1,		/* yeig    */
+    0,		/* xsize   */
+    0,		/* ysize   */
+    0,		/* h       */
+    NULL,	/* cmd     */
+    NULL,	/* infile  */
+    NULL,	/* outfile */
+    NULL,	/* f       */
+    NULL,	/* depend  */
+  };
+  char *cli;
+  int ctrl_match = FALSE;
+
+  if (e = _swix(OS_GetEnv, _OUT(0), &cli))
+    usage(e);
+
+  if (e = read_args(cli, OPTIONS "," OPTIONS_NOCTRL, &arg))
+    usage(e);
+
+  if (arg.h)
+    usage(NULL);
+
+  if (arg.f)
+  {
+    FILE *f;
+
+    /* override options from control file */
+    if (f = fopen(arg.f, "rb"))
+    {
+      char mask[256];
+      char opts[64];
+
+      while (fscanf(f, "%255s%*[\t ]%63[^\n]", mask, opts) == 2)
+      {
+        if (*mask == '>')
+          ctrl_match = wcmpi(arg.o, mask+1);
+        else
+          ctrl_match = wcmpi(arg.i, mask);
+        if (ctrl_match)
+          if (e = read_args(opts, OPTIONS, &arg))
+            usage(e);
+      }
+      fclose(f);
+    }
+    else
+    {
+      fprintf(stderr, "Control file '%s' wouldn't open.\n", arg.f);
+      exit(1);
+    }
+  }
+
+  if (arg.depend)
+  {
+    FILE *depend = fopen(arg.depend, "w");
+
+    if (arg.i)
+      fprintf(depend, "%s:\t%s\n", arg.o, arg.i);
+    if (arg.f && ctrl_match)
+      fprintf(depend, "%s:\t%s\n", arg.o, arg.f);
+    if (arg.p)
+      fprintf(depend, "%s:\t%s\n", arg.o, arg.p);
+    fclose(depend);
+  }
+
+  if (arg.v)
+  {
+    fprintf(stderr, "Active options:\n");
+    if (arg.a != 8)
+      fprintf(stderr, "-a %d ", arg.a);
+    if (arg.b != 0xffffff)
+      fprintf(stderr, "-b &%06x ", arg.b);
+    if (arg.c)
+      fprintf(stderr, "-c %d ", arg.c);
+    if (arg.m)
+      fprintf(stderr, "-m %d ", arg.m);
+    if (arg.mat)
+      fprintf(stderr, "-mat %s ", arg.mat);
+    if (arg.n)
+      fprintf(stderr, "-n %s ", arg.n);
+    if (arg.p)
+      fprintf(stderr, "-p %s ", arg.p);
+    if (arg.s)
+      fprintf(stderr, "-s ");
+    if (arg.yeig != 1)
+      fprintf(stderr, "-yeig %d ", arg.yeig);
+    if (arg.xeig != 1)
+      fprintf(stderr, "-xeig %d ", arg.xeig);
+    if (arg.xsize)
+      fprintf(stderr, "-xsize %d ", arg.xsize);
+    if (arg.ysize)
+      fprintf(stderr, "-ysize %d ", arg.ysize);
+    fprintf(stderr, "\n");
+  }
+
+  arg.a = 442 * arg.a / 100;
+  arg.b = (arg.b & 0xff0000)>>16 | (arg.b & 0xff00) | (arg.b & 0xff)<<16;
+  if (arg.c > 256) arg.c = 256;
+  if (!arg.mat) arg.mat = "materials";
+  if (arg.yeig > 3) arg.yeig = 3;
+  if (arg.yeig < 0) arg.yeig = 0;
+  if (arg.xeig > 3) arg.xeig = 3;
+  if (arg.xeig < 0) arg.xeig = 0;
+  arg.m = 17 - arg.m;
+
+  if (!arg.n)
+  {
+    char *leaf = strrchr(arg.i, '.');
+
+    arg.n = strdup(leaf? leaf+1 : arg.i);
+  }
+
+  {
+    int type = ftype(arg.i);
+    int i=0;
+
+    while (converters[i].doit)
+    {
+      if (type == converters[i].type)
+      {
+        word *spr;
+
+        if (spr = converters[i].doit(&arg, &e))
+          if (!(e = post_process(spr, &arg)))
+            exit(0);
+
+        fputs(e->errmess, stderr);
+        exit(1);
+      }
+      i++;
+    }
+  }
+  fprintf(stderr, "Unsupported input file type.\n");
+  exit(1);
+}
+

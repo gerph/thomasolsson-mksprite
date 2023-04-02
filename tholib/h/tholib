@@ -1,0 +1,330 @@
+/* "tholib" 1.10 (24 May 2005)
+ *
+ * Various utility functions
+ */
+
+#ifndef __tholib_h
+#define __tholib_h
+
+/* ---- Defines ------------------------------------------------------------ */
+#ifndef BOOL
+#define BOOL int
+#define FALSE 0
+#define TRUE  (!FALSE)
+#endif
+
+#define DS_FILE       0x0001
+#define DS_ENTERDIR   0x0002
+#define DS_ENTERIMAGE 0x0004
+#define DS_LEAVEDIR   0x0008
+#define DS_LEAVEIMAGE 0x0010
+#define DS_RECDIR     0x0100
+#define DS_RECIMAGE   0x0200
+
+/*
+   Error handling in programs.
+
+   All routines work the same way. In general, functions are like this:
+
+   err_t *func(...)
+   {
+     if (OK(subfunc())) {
+       .. continue
+
+
+
+     }
+     return err_last;
+   }
+
+   Which means that they return NULL if OK, or a pointer to err_t (which is
+   the same as _kernel_oserror). Calling like this leaves err_last at either
+   NULL or the error from the first failing call.
+
+   Eventually err_last propagates up to the GUI code, which can display
+   something.
+
+   Calling a routine and ignoring any error is simply done with func();
+
+   External functions that don't adhere to this convention should be
+   wrapped in macros until they do.
+
+   If no clean-up code is required, the macro DO() can be used to call a function
+   and return the error pointer if it is non-zero.
+
+   The MUST() macro calls a function that returns an error pointer. Any error will
+   be reported and exit(1) will be called.
+
+   For functions that need to return different values, there are two possibilities:
+
+   1. Indicate the error condition by returning a special invalid value (e.g. NULL).
+      This is the fastest way, since the caller can check R0 instead of a global
+      variable (err_last). err_last is only set if this special value is returned.
+
+   2. If all return values need to be valid, set err_last on error. This should
+      rarely be used, since it requires the caller to clear err_last before the
+      call, and check it afterwards, which is slow.
+
+*/
+
+#if DEBUG
+  #define PD err_pd
+  #define OK(a) (!((err_last = (a)) && err_setline(err_last, __FILE__, __LINE__)))
+#else
+  #define PD 1?(void)0:(void)printf
+  #define OK(a) (!(err_last = (a)))
+#endif
+
+#define ERR(a) (!OK(a))
+
+#define DO(a) if (ERR(a)) return err_last
+#define MUST(a) if (ERR(a)) err_fatal()
+
+// calloc block, evaluate as error
+#define NEW(ptr, purpose) (((ptr) = calloc(1, sizeof(*(ptr))))? NULL : err(1, "No memory for %s", purpose))
+
+
+/* ---- Declarations ------------------------------------------------------- */
+
+#include "kernel.h"
+
+typedef unsigned char byte;
+typedef unsigned int  word;
+typedef _kernel_oserror err_t;
+
+typedef struct {
+  word lsw;
+  word msw;
+} os_time;
+
+typedef struct
+{
+  union
+  {
+    struct
+    {
+      word load;
+      word exec;
+    } le;
+    struct
+    {
+      word date_h :8,
+           type   :12,
+           fff    :12;
+      word date_l;
+    } dt;
+  } info;
+  word size;
+  word attr;
+  word type;
+  char name;
+} gbpb10_info;
+
+typedef void *ds_callback(int type, const char *name, void *data, const gbpb10_info *info);
+
+
+/* ---- Independants ------------------------------------------------------- */
+
+
+/* ---- Includes ----------------------------------------------------------- */
+
+#include <stdio.h>
+#include "time.h"
+#include "swis.h"
+
+
+/* ---- Dependants --------------------------------------------------------- */
+
+extern err_t *err_last;
+extern FILE  *err_output;
+
+
+/* ---- Functions ---------------------------------------------------------- */
+
+// Error handling
+
+// Return static error block
+err_t *err(int num, const char *msg,...);
+void   err_pd(const char *fmt, ...);
+int    err_setline(err_t *e, const char *file, unsigned long line);
+void   err_show(const err_t *err);
+void   err_report(void);
+void   err_log(void);
+void   err_fatal(void);
+
+
+/* Convert time_t to os_time */
+void ctime_to_os(time_t ct, os_time *os);
+
+/* Claim block and copy string */
+char *strdup(const char *str);
+
+/* Claim block and copy string, but return NULL if str is NULL */
+char *strdup_n(const char *str);
+
+/* Claim block and copy n bytes */
+char *strndup(const char *str, int len);
+
+// strdup a control-terminated string
+char *strcdup(const char *str);
+
+// Return new string containing s1 followed by s2
+char *strapp(char *s1, const char *s2);
+
+/* Decode command line */
+err_t *read_args(const char *arg, const char *format, void *array);
+
+/* Return file size or 0 */
+word fsize(const char *filename);
+
+/* Return object type */
+word fobjtype(const char *filename);
+
+/* Return file type or -1 */
+int ftype(const char *filename);
+
+/* Set filetype */
+void settype(const char *filename, int type);
+
+/* Load into memory */
+err_t *fload(const char *filename, void *buffer);
+
+/* Save block of memory */
+err_t *fsave(const char *filename, int type, const void *buffer, size_t size);
+
+/* Create directory */
+err_t *cdir(const char *dirname);
+
+/* Compare string to wildcard mask, return true if match */
+int wcmps(const char *test, const char *wild);
+
+/* As above, case insensitive */
+int wcmpi(const char *test, const char *wild);
+
+/* As INKEY in Basic (exactly, i.e. returns -1 for TRUE) */
+int inkey(int key);
+
+/* case-insensitive versions of strcmp and strncmp */
+int strcasecmp(const char *s1, const char *s2);
+int strncasecmp(const char *s1, const char *s2, size_t n);
+
+// Convert string to upper/lower case (in place)
+void upcase(char *str);
+void locase(char *str);
+
+/* Return modevar */
+int modevar(int mode, int var);
+
+/* Return vduvar */
+int vduvar(int var);
+
+/* Scan directory (port of DirScan lib)
+   Call to scan dir.
+
+   base		Base directory (not called back for)
+   cb		Callback function
+   data		Metadata to pass on
+   flags	Type of service (bitmap)
+   		DS_FILE		Callback (code 1) for files, else don't
+   		DS_ENTERDIR	Callback (code 2) before entering a directory (also called when not
+   				actually entering it due to DS_RECDIR being clear.)
+   		DS_ENTERIMAGE	Callback (code 3) before entering an image (as above with DS_RECIMAGE)
+   		DS_LEAVEDIR	Callback (code 4) when leaving a directory (as above)
+   		DS_LEAVEIMAGE	Callback (code 5) when leaving an image (as above)
+   		DS_RECDIR	Recurse into dirs, else don't.
+   		DS_RECIMAGE	Recurse into images, else don't
+
+   Callback function:
+   type		Type of callback:
+   		1 File
+   		2 Entering directory
+   		3 Entering image
+   		4 Leaving directory
+   		5 Leaving image
+   name		Object name
+   data		metadata passed in
+   info		Object info block
+   Return value:
+   0	Normal termination
+   <>0	Stop scan and return this value from ds_scan
+*/
+
+void *ds_scan(const char *base, ds_callback *cb, void *data, word flags);
+
+/* Recursively ensure parents exist (mkdir -p) */
+void ensureparent(const char *name);
+
+/* change filename, making unsafe chars safe */
+void transfile(char *name);
+
+/* Send a bis message */
+void bismsg(const char *fmt, ...);
+
+/* Utils for doubly linked lists */
+
+// Create empty list
+void ll_initlist(void *data);
+
+// Remove d from list
+void ll_unlink(void *d);
+
+// Insert d after h in list
+void ll_addafter(void *h, void *d);
+
+// Insert d before h in list
+void ll_addbefore(void *h, void *d);
+
+// Insert a different list h2 before h1 in list. h2 is gone from both lists afterwards
+void ll_addllbefore(void *h1, void *h2);
+
+// Call routine for each item in list
+void *ll_foreach(void *h, void *(*callback)(void *, void *), void *metadata);
+
+// This is a 'radix insertion' sort. The code supplied must return non-0 if the given
+// bit is set in the key of the item given.
+// msb is the number of the most significant bit. getbit() will be called back for
+// msb, msb-1, ... 1, 0, or until the sorting is complete.
+void ll_sort(void *h, int msb, int (*getbit)(const void *item, int bit));
+
+// Inline SWIs, they must preserve r4-r11 and flags (so no X ones)
+void __swi(OS_Write0)               os_write0(const char *str);
+void __swi(OS_WriteN)               os_writeN(const char *str, int n);
+void __swi(OS_WriteI+0x07)          beep(void);
+void __swi(OS_WriteI+0x0c)          cls(void);
+void __swi(OS_WriteI+0x10)          clg(void);
+void __swi(OS_WriteI+0x12)          vdu_18(void);
+void __swi(OS_WriteI+0x13)          vdu_19(void);
+void __swi(OS_WriteI+0x18)          vdu_24(void);
+void __swi(OS_WriteI+0x1a)          vdu_26(void);
+void __swi(OS_WriteI+0x1b)          vdu_27(void);
+void __swi(OS_WriteI+0x1c)          vdu_28(void);
+void __swi(OS_WriteI+0x1d)          vdu_29(void);
+void __swi(OS_WriteI+0x1e)          vdu_30(void);
+void __swi(OS_WriteI+0x1f)          vdu_31(void);
+word __swi(OS_CRC)                  os_crc(word init, const void *start, const void *end, int inc);
+int  __swi(OS_Byte)                 os_byte(int a, int x, int y);
+void __swi(OS_Word)                 os_word(int a, void *p);
+int  __swi(OS_Plot)                 os_plot(int rc, int x, int y);
+void __swi(OS_File)                 os_file(int rc, const char *name, int, int);
+int  __swi(OS_Find)                 os_find_n(int rc, const char *name);
+void __swi(OS_Find)                 os_find_f(int rc, int fd);
+void __swi(OS_Args)                 os_args(int rc, int fd, int parm);
+void __swi(OS_ConvertInteger4)      os_convertinteger4(int num, char *buf, int bufs);
+void __swi(OS_ConvertFixedFileSize) os_convertfixedfilesize(int num, char *buf, int bufs);
+void __swi(OS_ConvertFileSize)      os_convertfilesize(int num, char *buf, int bufs);
+void __swi(OS_ConvertHex8)          os_converthex8(int num, char *buf, int bufs);
+void __swi(OS_ConvertDateAndTime)   os_convertdateandtime(os_time *t, char *buf, int bufs, const char *format);
+word __swi(OS_ReadMonotonicTime)    mtime(void);
+void __swi(OS_ReadVduVariables)     os_readvduvariables(int *in, int *out);
+void __swi(Hourglass_On)            hourglass_on(void);
+void __swi(Hourglass_Off)           hourglass_off(void);
+void __swi(Hourglass_Smash)         hourglass_smash(void);
+void __swi(Hourglass_Start)         hourglass_start(word delay);
+void __swi(Hourglass_Percentage)    hourglass_percentage(int percentage);
+void __swi(Wimp_PlotIcon)           wimp_ploticon(int foo, const void *block);
+void __swi(Wimp_SetColour)          wimp_setcolour(int col);
+int  __swi(Wimp_TextOp)             wimp_textwidth(int one, const char *str, int len);
+void __swi(Sound_Control)           sound_control(int ch, int amp, int frq, int dur);
+int  __swi(Sound_AttachNamedVoice)  sound_attachnamedvoice(int ch, const char *name);
+
+#endif

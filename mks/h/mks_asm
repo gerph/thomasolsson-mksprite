@@ -1,0 +1,6 @@
+#include "tholib.h"
+#include "mksprite.h"
+
+extern word tab8_32[];
+extern void render_aff(const word *spr, const word *draw, int len, const int *trans);
+extern __pure int magnitude(word num);

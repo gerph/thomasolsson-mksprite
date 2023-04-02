@@ -1,0 +1,5 @@
+#include "kernel.h"
+#include "tholib.h"
+#include "mksprite.h"
+
+extern word *convert_aff(const arg_t *arg, _kernel_oserror **e);
