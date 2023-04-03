@@ -12,7 +12,8 @@
  * use DA for big sprites
  */
 
-#define VERSION "1.09"
+#include "../VersionNum"
+#define VERSION Module_MajorVersion
 
 #include <stdlib.h>
 #include <stdarg.h>
