@@ -1,0 +1,3 @@
+set tst$dir <obey$dir>
+mksprite -m 4 -s -b &dddddd <tst$dir>.draw <tst$dir>.draw_s
+mksprite -mat <tst$dir>.materials <tst$dir>.pan <tst$dir>.pan_s
