@@ -3,7 +3,7 @@
 # Overview
 
 The MkSprite tool makes fairly optimal RISC OS Sprite files from DrawFiles and Euclid files
-It is designed to be easy to use in a makefile. It was written by Thomas Olsson (https://www.armware.dk/).
+It is designed to be easy to use in a makefile. It was written by Thomas Olsson (https://www.armpit.dk/files/mksprite/).
 
 ## Requirements
 
