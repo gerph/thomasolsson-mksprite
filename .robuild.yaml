@@ -28,8 +28,14 @@ jobs:
 
       - Echo --- Building MkSprite tool ---
       - dir ^.mks
-      - cdir ^.Install
-      - amu -f MakefileROBuild install INSTDIR=^.Install
+      - cdir ^.Release
+      - cdir ^.Release.Library
+      - amu -f MakefileROBuild install INSTDIR=^.Release.Library
+
+      - Echo --- Build the release into Install ---
+      - dir ^
+      - Copy Resources.* Release.* ~CVFR
+      - VTranslate VersionNum Resources.!Help Release.!Help
 
     # Outputs from the build are defined in artifacts
     # These are a list of artifacts to report directories or files.
@@ -37,4 +43,4 @@ jobs:
     artifacts:
       # Each element of the artifacts should have a path key, which gives the file or
       # directory to return.
-      - path: Install
+      - path: Release

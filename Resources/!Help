@@ -1,4 +1,4 @@
-                             Help for mksprite 1.07
+                             Help for mksprite {Module_MajorVersion}
                              ======================
 
 
@@ -198,17 +198,19 @@ the file to take a trip through !Draw to fix the boxes, otherwise the size
 may be slightly wrong.
 
 
-Files in doc
-------------
+Files in release
+----------------
 
-!Help		This file.
-draw		A test draw file.
-Materials	Some materials for the Euclid module.
-pan		A test euclid file.
-test		Obey file that attempts to convert draw and pan into sprites.
-ToSprite	A GenCon plugin for FilerPro, adding an entry to the Convert
-		window for draw and euclid. To use, put it in the directory
-		<Filer$Dir>.Utilities.GenCon.Functions.
+!Help               This file.
+Examples.draw       A test draw file.
+Examples.Materials  Some materials for the Euclid module.
+Examples.pan        A test Euclid file.
+Examples.test       Obey file that attempts to convert draw and pan
+                    into sprites.
+ToSprite            A GenCon plugin for FilerPro, adding an entry to
+                    the Convert window for draw and euclid. To use, put
+                    it in the directory
+                      <Filer$Dir>.Utilities.GenCon.Functions.
 
 
 How to make Euclid files
