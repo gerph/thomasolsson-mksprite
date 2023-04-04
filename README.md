@@ -1,19 +1,22 @@
-## MkSprite RISC OS tool
+## MkSprite & SFMerge RISC OS tools
 
 # Overview
 
-The MkSprite tool makes fairly optimal RISC OS Sprite files from DrawFiles and Euclid files
+The MkSprite tool makes fairly optimal RISC OS Sprite files from DrawFiles and Euclid files.
 It is designed to be easy to use in a makefile. It was written by Thomas Olsson (https://www.armpit.dk/files/mksprite/).
+
+The SFMerge tool takes a number of RISC OS Sprite files and merges them to create a single Sprite file containing
+all the sprites.
 
 ## Requirements
 
 * RISC OS, and a certain amount of laziness.
-* The Euclid module (if you want to convert Euclid files). 
+* The Euclid module (if you want to convert Euclid files).
 
 ## List of main features
 
 * Adjustable accuracy, mask level etc.
-* Control files for adjusting the options for certain files. 
+* Control files for adjusting the options for certain files.
 
 ## Example
 
@@ -25,4 +28,4 @@ What you see here, is the original draw file at 8:1 scaling, then the resultant 
 
 * Download a release Zip archive from the [Releases page](https://github.com/gerph/thomasolsson-mksprite/releases).
 * Extract the archive on RISC OS.
-* Copy the `Library.mksprite` file into your library.
+* Copy the `Library.mksprite` and `Library.sfmerge` files into your library.
