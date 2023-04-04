@@ -26,16 +26,22 @@ jobs:
       - dir THOLib
       - amu -f MakefileROBuild export
 
-      - Echo --- Building MkSprite tool ---
-      - dir ^.mks
+      - Echo --- Create release directories ---
       - cdir ^.Release
       - cdir ^.Release.Library
+
+      - Echo --- Building MkSprite tool ---
+      - dir ^.mks
       - amu -f MakefileROBuild install INSTDIR=^.Release.Library
 
-      - Echo --- Build the release into Install ---
+      - Echo --- Building MkSprite tool ---
+      - dir ^.sfmerge
+      - amu -f Makefile install INSTDIR=^.Release.Library
+
+      - Echo --- Build the release ---
       - dir ^
       - Copy Resources.* Release.* ~CVFR
-      - VTranslate VersionNum Resources.!Help Release.!Help
+      - VTranslate VersionNum Resources.MkSprite Release.MkSprite
 
     # Outputs from the build are defined in artifacts
     # These are a list of artifacts to report directories or files.

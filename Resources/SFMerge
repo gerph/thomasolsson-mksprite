@@ -1,0 +1,23 @@
+                        Help for sfmerge 1.00
+                        =====================
+
+
+mksprite is a simple sprite file merger. It takes a lot of sprite files and
+merges them into one.
+
+Syntax:
+*sfmerge <outfile> <infile> [<infile> ...]
+
+If <outfile> doesn't exist, it is created. All the <infile>s given are then
+merged into <outfile>.
+
+
+Contact
+=======
+
+Questions, etc. should be addressed to:
+Thomas Olsson
+tolsson@armware.dk
+
+New versions can be found at:
+https://www.armpit.dk/files/
