@@ -245,18 +245,30 @@ static word *tidy_sprite(word *spr, const arg_t *arg, int xs, int ys)
     qsort(pal, ncol, sizeof(pixel_t), pix_cmp);
 
   {
-    static int mode[] = {1,0,0,0,-1,3,128,4,1,5,1,-1,-1};
+    static int mode[] = {1,0,0,0,-1,3,-1,4,1,5,1,-1,-1};
     int x,y;
     int mask = 0;
 
     mode[1] = xs;
     mode[2] = ys;
     mode[3] = l2bpp;
+    mode[6] = (1<<(1<<l2bpp)) - 1;
     mode[8] = arg->xeig;
     mode[10] = arg->yeig;
     tspr[0] = tsprs;
     tspr[2] = 16;
     _swi(OS_SpriteOp, _INR(0,1), 0x209, tspr);
+    // Debug - print the mode specifier we use to create sprite
+    /*
+    fprintf(stderr, "call 10f - xs = %i, ys = %i\n", xs, ys);
+    {
+        int i;
+        for (i=0; i<sizeof(mode) / sizeof(mode[0]); i++)
+        {
+            fprintf(stderr, "  mode[%i] = %9i &%x\n", i, mode[i], mode[i]);
+        }
+    }
+    */
     _swi(OS_SpriteOp, _INR(0,6), 0x10f, tspr, arg->n, 0, xs, ys, mode);
     _swi(OS_SpriteOp, _INR(0,3), 0x225, tspr, tspr+4, 0x80000000);
     write_palette(tspr, pal, ncol);
