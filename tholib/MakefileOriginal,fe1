@@ -28,13 +28,3 @@ o.tholib:	$(TL_OBJ)
 		libfile $(LFFLAGS) $(TL_OBJ)
 
 # Dynamic dependencies:
-o.tho:	c.tho
-o.tho:	C:h.kernel
-o.tho:	C:h.ctype
-o.tho:	C:h.swis
-o.tho:	h.tholib
-o.tho:	C:h.kernel
-o.tho:	C:h.time
-o.tho:	C:h.swis
-o.thoasm: s.thoasm
-o.thoasm: C:h.SWINames
